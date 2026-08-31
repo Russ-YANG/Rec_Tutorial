@@ -1,10 +1,8 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
 import pandas as pd
 import random
 
@@ -415,4 +413,3 @@ if __name__ == "__main__":
         for i, (item_id, score) in enumerate(recommendations):
             print(f"{i+1}. 物品ID: {item_id}, 预测得分: {score:.4f}")
         
-

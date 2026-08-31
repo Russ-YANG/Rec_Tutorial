@@ -1,10 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import sys
-import os
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from .senet import SENet # 直接复用
 from .bilinear_interaction import BilinearInteraction
 
@@ -16,7 +11,7 @@ class FiBiNET(nn.Module):
                  hidden_dims=[256, 128, 64], 
                  dropout_rate=0.2, 
                  reduction_ratio=3,
-                 bilinear_type='field_interaction'): # 这个type暂时先不用
+                 bilinear_type='field_interaction'):
 
         super(FiBiNET, self).__init__()
         
@@ -31,10 +26,8 @@ class FiBiNET(nn.Module):
             embedding_dim, num_fields, bilinear_type
         )
 
-        # if bilinear_type == 'field_all':
-        #     bilinear_dim = num_fields * num_fields
-        # else:  # field_interaction
-        #     bilinear_dim = (num_fields * (num_fields - 1)) // 2
+        pair_count = num_fields * (num_fields - 1) // 2
+        bilinear_dim = pair_count * embedding_dim
         
         # 组合层
         # 输入包括：原始特征交互 + SENet加权特征交互
@@ -64,5 +57,4 @@ class FiBiNET(nn.Module):
         output = torch.sigmoid(self.output_layer(dnn_output))
         
         return output.squeeze(1)
-
 

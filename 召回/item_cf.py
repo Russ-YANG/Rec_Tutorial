@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 from collections import defaultdict
 import math
 
@@ -84,12 +83,14 @@ class ItemCF:
     
     def recommend_for_user(self, user_id, n_rec=10):
 
-        interacted_items = self.user_items[user_id] # 召回lastn
+        interacted_item_ids = self.user_item_index[user_id]
+        interacted_items = set(interacted_item_ids)
         item_scores = defaultdict(float)
 
-        for item_i, rating_i in interacted_items.items():
+        for item_i in interacted_item_ids:
+            rating_i = self.user_items[user_id][item_i]
             # 用户对历史交互物品的兴趣 * 待计算物品和该物品的相似度
-            for item_j, sim_ij in self.item_sim[item_i].items():
+            for sim_ij, item_j in self.item_sim_sorted[item_i]:
                 if item_j in interacted_items:  # 跳过用户已交互的物品
                     continue
                 item_scores[item_j] += rating_i * sim_ij
@@ -98,10 +99,10 @@ class ItemCF:
     def build_user_item_index(self):
         self.user_item_index = {}
         
-        for user_id, items in self.user_items.items():
-            # 按评分降序排列 保留lastn个
-            sorted_items = sorted(items.items(), key=lambda x: x[1], reverse=True)[:self.lastn]
-            self.user_item_index[user_id] = [item for item, _ in sorted_items]
+        sorted_ratings = self.ratings.sort_values('timestamp')
+        for user_id, group in sorted_ratings.groupby('userId'):
+            recent_items = group['movieId'].tail(self.lastn).tolist()
+            self.user_item_index[user_id] = recent_items
     
     def build_item_item_index(self):
         """
@@ -125,7 +126,6 @@ class ItemCF:
         self.build_user_item_index()
         self.build_item_item_index()
         
-        print("111")
         return self
 
 if __name__ == "__main__":

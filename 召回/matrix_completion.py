@@ -5,9 +5,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
-import time
-import os
 
 class MovieLensDataset(Dataset):
     # 继承后需要重写len和getitem方法
@@ -22,7 +19,6 @@ class MovieLensDataset(Dataset):
 
         self.user_map = {user_id: idx for idx, user_id in enumerate(self.user_ids)}
         # 返回一个字典，key是原始user_id，value是从0开始的索引
-        print(self.user_map)
         self.item_map = {item_id: idx for idx, item_id in enumerate(self.item_ids)}
         
         train_data, test_data = train_test_split(

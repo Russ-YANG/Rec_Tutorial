@@ -35,13 +35,16 @@ class FactorizationMachine:
                     if x[j] != 0:  # 跳过零值特征，优化稀疏数据计算
                         gradient_wj = error * x[j]
                         self.w[j] -= self.learning_rate * gradient_wj
-                
+
+                # 梯度必须基于同一个更新前的参数状态计算。
+                sum_vx = np.zeros(self.n_factors)
+                for f in range(self.n_factors):
+                    sum_vx[f] = np.sum(self.v[:, f] * x)
+
                 for j in range(self.n_features):
                     if x[j] != 0:
-
                         for f in range(self.n_factors):
-                            sum_vx = np.sum(self.v[:, f] * x)
-                            gradient_vjf = error * (x[j] * sum_vx - self.v[j, f] * x[j]**2)
+                            gradient_vjf = error * (x[j] * sum_vx[f] - self.v[j, f] * x[j]**2)
                             self.v[j, f] -= self.learning_rate * gradient_vjf
 
             y_pred = self.predict(X)
@@ -68,7 +71,13 @@ class FactorizationMachine:
         interaction_term = 0.5 * np.sum(sum_vx_square**2 - sum_vx2)
         # 最终预测值 = 线性项 + 二阶交互项
         return linear_term + interaction_term
+
+    def predict(self, X):
+        predictions = []
+        for i in range(len(X)):
+            prediction = self.predict_one(X[i])
+            predictions.append(prediction)
+        return np.array(predictions)
     
     def get_feature_interactions(self, i, j):
         return np.dot(self.v[i], self.v[j])
-

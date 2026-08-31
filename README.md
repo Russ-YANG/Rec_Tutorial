@@ -1,7 +1,16 @@
 # Rec_Tutorial
 
-> 暂时只用 `u.data` 文件。
-8
+这是一个用基础写法实现推荐系统算法的个人练习项目。代码重点是展示算法步骤，
+没有封装生产环境的数据校验、异常恢复和大规模检索优化。
+
+## 环境
+
+先运行 pip install -r requirements.txt 安装依赖。
+
+主要示例使用转换后的 ml-100k/ratings.csv，字段为
+userId,movieId,rating,timestamp。原始 MovieLens 100K 文件也保留在同一目录。
+
+## 原始数据说明
 - **u.data**：主评分数据，结构为：
   
   | user_id | item_id | rating | timestamp |
@@ -23,4 +32,3 @@
   | ------- | --- | ------ | ---------- | -------- |
 
 - **u1.base/u1.test ... u5.base/u5.test**：5折交叉验证划分的数据子集
-

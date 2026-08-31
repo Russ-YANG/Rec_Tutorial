@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 from collections import defaultdict
 import math
 
@@ -35,7 +34,8 @@ class UserCF:
     def get_user_items(self):
         # 构建用户 - 物品索引
         if self.ratings is not None:
-            for user, group in self.ratings.groupby("userId"):
+            sorted_ratings = self.ratings.sort_values("timestamp")
+            for user, group in sorted_ratings.groupby("userId"):
                 self.user_item_index[user] = group["movieId"].tail(self.lastn).tolist()
         return self.user_item_index
     

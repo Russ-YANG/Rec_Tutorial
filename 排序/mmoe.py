@@ -1,15 +1,14 @@
 import pandas as pd
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
 
 
 class MovieLensDataset(Dataset):
-    def __init__(self, ratings_file, train=True, test_size=0.2):
+    def __init__(self, ratings_file, train=True, test_size=0.2,
+                 rating_mean=None, rating_std=None):
         self.ratings = pd.read_csv(ratings_file)
         
         self.user_ids = self.ratings['userId'].unique()
@@ -25,8 +24,12 @@ class MovieLensDataset(Dataset):
         self.data = train_data if train else test_data
         
 
-        self.rating_mean = self.data['rating'].mean()
-        self.rating_std = self.data['rating'].std()
+        if rating_mean is None:
+            self.rating_mean = train_data['rating'].mean()
+            self.rating_std = train_data['rating'].std()
+        else:
+            self.rating_mean = rating_mean
+            self.rating_std = rating_std
     
     def __len__(self):
         return len(self.data)
@@ -104,24 +107,30 @@ class MMoE(nn.Module):
         
         expert_output_dim = expert_hidden_dims[-1]
         
-        self.gate_networks = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(input_dim, gate_hidden_dims[0]),
-                nn.ReLU(),
-                nn.Linear(gate_hidden_dims[0], num_experts),
-                nn.Softmax(dim=1)
-            ) for _ in range(num_tasks)
-        ])
-        
-        self.task_towers = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(expert_output_dim, task_hidden_dims[0]),
-                nn.ReLU(),
-                nn.BatchNorm1d(task_hidden_dims[0]),
-                nn.Dropout(0.2),
-                nn.Linear(task_hidden_dims[0], 1)
-            ) for _ in range(num_tasks)
-        ])
+        self.gate_networks = nn.ModuleList()
+        for _ in range(num_tasks):
+            gate_layers = []
+            gate_input_dim = input_dim
+            for hidden_dim in gate_hidden_dims:
+                gate_layers.append(nn.Linear(gate_input_dim, hidden_dim))
+                gate_layers.append(nn.ReLU())
+                gate_input_dim = hidden_dim
+            gate_layers.append(nn.Linear(gate_input_dim, num_experts))
+            gate_layers.append(nn.Softmax(dim=1))
+            self.gate_networks.append(nn.Sequential(*gate_layers))
+
+        self.task_towers = nn.ModuleList()
+        for _ in range(num_tasks):
+            tower_layers = []
+            tower_input_dim = expert_output_dim
+            for hidden_dim in task_hidden_dims:
+                tower_layers.append(nn.Linear(tower_input_dim, hidden_dim))
+                tower_layers.append(nn.ReLU())
+                tower_layers.append(nn.BatchNorm1d(hidden_dim))
+                tower_layers.append(nn.Dropout(0.2))
+                tower_input_dim = hidden_dim
+            tower_layers.append(nn.Linear(tower_input_dim, 1))
+            self.task_towers.append(nn.Sequential(*tower_layers))
         
         self._init_weights()
     
@@ -235,7 +244,9 @@ class MMoERecommender:
         self.test_dataset = MovieLensDataset(
             self.path, 
             train=False, 
-            test_size=self.test_size
+            test_size=self.test_size,
+            rating_mean=self.train_dataset.rating_mean,
+            rating_std=self.train_dataset.rating_std
         )
         
         self.train_dataloader = DataLoader(
@@ -363,6 +374,59 @@ class MMoERecommender:
             'test_rating_loss': test_rating_losses[-1],
             'test_total_loss': test_total_losses[-1]
         }
+
+    def recommend_for_user(self, user_id, top_n=10, recommendation_type='hybrid'):
+        user_map = self.train_dataset.user_map
+        item_map = self.train_dataset.item_map
+        rated_rows = self.train_dataset.ratings[
+            self.train_dataset.ratings['userId'] == user_id
+        ]
+        rated_items = set(rated_rows['movieId'])
+
+        candidate_items = []
+        for item_id in item_map:
+            if item_id not in rated_items:
+                candidate_items.append(item_id)
+
+        predictions = []
+        self.model.eval()
+        with torch.no_grad():
+            batch_size = 512
+            for start in range(0, len(candidate_items), batch_size):
+                batch_items = candidate_items[start:start + batch_size]
+                user_indices = [user_map[user_id]] * len(batch_items)
+                item_indices = []
+                for item_id in batch_items:
+                    item_indices.append(item_map[item_id])
+
+                user_tensor = torch.tensor(user_indices, dtype=torch.long).to(self.device)
+                item_tensor = torch.tensor(item_indices, dtype=torch.long).to(self.device)
+                click_predictions, normalized_ratings = self.model(user_tensor, item_tensor)
+
+                for i in range(len(batch_items)):
+                    click_probability = click_predictions[i].item()
+                    normalized_rating = normalized_ratings[i].item()
+                    rating = (
+                        normalized_rating * self.train_dataset.rating_std
+                        + self.train_dataset.rating_mean
+                    )
+
+                    if recommendation_type == 'click':
+                        score = click_probability
+                    elif recommendation_type == 'rating':
+                        score = normalized_rating
+                    else:
+                        score = click_probability + normalized_rating
+
+                    predictions.append({
+                        'item_id': batch_items[i],
+                        'click_prob': click_probability,
+                        'rating': rating,
+                        'score': score
+                    })
+
+        predictions.sort(key=lambda row: row['score'], reverse=True)
+        return predictions[:top_n]
     
 
 

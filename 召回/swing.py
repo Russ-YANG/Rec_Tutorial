@@ -1,7 +1,5 @@
 import pandas as pd
-import numpy as np
 from collections import defaultdict
-import math
 
 # swing，itemcf的变体
 class Swing:
@@ -61,48 +59,50 @@ class Swing:
         return set(users1) & set(users2)
     
     def compute_item_similarity(self):
-        # 两个物品的Swing相似度 = 1 / factor + overlap(u1,u2)
+        # 两个物品的 Swing 相似度是所有共同用户对贡献的和。
+        # 每对用户的贡献 = 1 / (alpha + overlap(u1, u2))
         # 不需要考虑rating
             
         self.get_user_items() # 返回如{user_id: {item_id: rating}}
         self.get_co_users()   # 返回如{item_id: [user_id1, user_id2, ...]}
 
-        for u, items in self.user_items.items():
-            print("处理用户:", u)
-            items = list(items.keys())[-self.lastn:] # 最近lastn个物品
-            # 两两物品配对
-            for i in range(len(items)):
-                for j in range(i + 1, len(items)):
-                    item_i, item_j = items[i], items[j]
-                    # 获取共同用户集合
-                    users_i = self.item_users[item_i]
-                    users_j = self.item_users[item_j]
-                    overlap_users = self.get_overlap(users_i, users_j)
-                    overlap_users = list(overlap_users)
+        item_ids = list(self.item_users.keys())
+        for i in range(len(item_ids)):
+            for j in range(i + 1, len(item_ids)):
+                item_i = item_ids[i]
+                item_j = item_ids[j]
+                common_users = list(self.get_overlap(self.item_users[item_i], self.item_users[item_j]))
 
-                    for idx1 in range(len(overlap_users)):
-                        for idx2 in range(idx1 + 1, len(overlap_users)):
-                            u1, u2 = overlap_users[idx1], overlap_users[idx2]
-                            contrib = 1.0 / (self.alpha + len(self.get_overlap(self.user_items[u1], self.user_items[u2])))
-                            self.item_sim[item_i][item_j] = self.item_sim[item_i].get(item_j, 0.0) + contrib 
-                            self.item_sim[item_j][item_i] = self.item_sim[item_j].get(item_i, 0.0) + contrib
+                similarity = 0.0
+                for first in range(len(common_users)):
+                    for second in range(first + 1, len(common_users)):
+                        user_1 = common_users[first]
+                        user_2 = common_users[second]
+                        overlap = self.get_overlap(self.user_items[user_1], self.user_items[user_2])
+                        similarity += 1.0 / (self.alpha + len(overlap))
+
+                if similarity > 0.0:
+                    self.item_sim[item_i][item_j] = similarity
+                    self.item_sim[item_j][item_i] = similarity
 
         # 排序
-        self.item_sim_sorted = {
-            i: sorted(sim.items(), key=lambda x: x[1], reverse=True)[:self.top_k]
-            for i, sim in self.item_sim.items()
-        }
+        self.item_sim_sorted = {}
+        for item_id, similarities in self.item_sim.items():
+            sorted_items = sorted(similarities.items(), key=lambda x: x[1], reverse=True)
+            self.item_sim_sorted[item_id] = sorted_items[:self.top_k]
         return self.item_sim_sorted
 
     def recommend_for_user(self, user_id, n_rec=10):
         interacted_items = self.user_items[user_id]  # {item: rating}
         item_scores = defaultdict(float)
 
-        for item_i, rating_i in interacted_items.items():
+        recent_item_ids = self.user_item_index[user_id]
+        for item_i in recent_item_ids:
+            rating_i = interacted_items[item_i]
             # 用户对历史交互物品的兴趣 * 待计算物品和该物品的相似度
             if item_i not in self.item_sim:
                 continue
-            for item_j, sim_ij in self.item_sim[item_i].items():
+            for item_j, sim_ij in self.item_sim_sorted[item_i]:
                 if item_j in interacted_items:  # 跳过用户已交互的物品
                     continue
                 item_scores[item_j] += rating_i * sim_ij
@@ -111,10 +111,9 @@ class Swing:
     def build_user_item_index(self):
         self.user_item_index = {}
         
-        for user_id, items in self.user_items.items():
-            # 按评分降序排列 保留lastn个
-            sorted_items = sorted(items.items(), key=lambda x: x[1], reverse=True)[:self.lastn]
-            self.user_item_index[user_id] = [item for item, _ in sorted_items]
+        sorted_ratings = self.ratings.sort_values('timestamp')
+        for user_id, group in sorted_ratings.groupby('userId'):
+            self.user_item_index[user_id] = group['movieId'].tail(self.lastn).tolist()
     
     def build_item_item_index(self):
         """
@@ -137,14 +136,12 @@ class Swing:
         self.build_user_item_index()
         self.build_item_item_index()
         
-        print("111")
-        return 0
+        return self
     
 
 if __name__ == "__main__":
     model = Swing(dataset_path="ml-100k/ratings.csv", top_k=10, lastn=20)
     if model.load_data():
-        print("111")
         model.train()
         user_id = 1
 

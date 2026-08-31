@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 class AttentionLayer(nn.Module):
     # 论文里的激活函数似乎并不是直接用的relu
@@ -104,6 +103,5 @@ class DIN(nn.Module):
         prediction = torch.sigmoid(output).squeeze(1)
         
         return prediction, attention_weights # 点击率+权重
-
 
 

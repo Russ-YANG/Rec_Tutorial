@@ -12,23 +12,14 @@ class LHUC_PPNet(nn.Module):
 
         super(LHUC_PPNet, self).__init__()
         
-        self.user_layers = nn.ModuleList()
-        input_dim = user_dim
-        
-        for hidden_dim in hidden_dims:
-            self.user_layers.append(nn.Linear(input_dim, hidden_dim))
-            input_dim = hidden_dim
+        self.main_layers = nn.ModuleList()
+        self.gate_layers = nn.ModuleList()
+        input_dim = user_dim + item_dim
 
-        self.item_layers = nn.ModuleList()
-        input_dim = item_dim
-        
         for hidden_dim in hidden_dims:
-            self.item_layers.append(nn.Linear(input_dim, hidden_dim))
+            self.main_layers.append(nn.Linear(input_dim, hidden_dim))
+            self.gate_layers.append(nn.Linear(user_dim, hidden_dim))
             input_dim = hidden_dim
-
-        self.lhuc_layers = nn.ParameterList()
-        for hidden_dim in hidden_dims:
-            self.lhuc_layers.append(nn.Parameter(torch.zeros(hidden_dim)))
 
         self.output_layer = nn.Sequential(
             nn.Linear(hidden_dims[-1], 1),
@@ -40,26 +31,18 @@ class LHUC_PPNet(nn.Module):
     
     def forward(self, user_features, item_features):
 
-        user_repr = user_features
-        item_repr = item_features
+        representation = torch.cat([user_features, item_features], dim=1)
 
         for i in range(len(self.hidden_dims)):
-            # 用户特征表示
-            user_repr = F.relu(self.user_layers[i](user_repr))
-            user_repr = self.dropout(user_repr)
-            
-            # 物品特征
-            item_repr = F.relu(self.item_layers[i](item_repr))
-            item_repr = self.dropout(item_repr)
-            
+            representation = self.main_layers[i](representation)
+            representation = F.relu(representation)
 
-            lhuc_weights = 2 * torch.sigmoid(self.lhuc_layers[i])
-            
-            # 用哈达玛积
-            combined_repr = user_repr * item_repr * lhuc_weights
-            user_repr = combined_repr
-        output = self.output_layer(user_repr)
+            gate = self.gate_layers[i](user_features)
+            gate = 2.0 * torch.sigmoid(gate)
+            representation = representation * gate
+            representation = self.dropout(representation)
+
+        output = self.output_layer(representation)
         
         return output.squeeze(1)
-
 

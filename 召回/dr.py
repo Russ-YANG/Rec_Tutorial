@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -80,12 +79,10 @@ class MovieLensDataset(Dataset):
         user_idx = self.user_map[user_id]
         
         item_paths = self.item_to_paths[item_id]
-    
-        target_path = random.choice(item_paths)
         
         sample = {
             'user_idx': torch.tensor(user_idx, dtype=torch.long),
-            'target_path': torch.tensor(target_path, dtype=torch.long),
+            'target_paths': torch.tensor(item_paths, dtype=torch.long),
             'item_id': item_id
         }
         
@@ -162,7 +159,20 @@ class DeepRetrieval(nn.Module):
 
         user_emb = self.user_embedding(user_idx)  # [batch_size, embedding_dim]
         
-        if self.training and target_paths is not None:
+        if target_paths is not None:
+            paths_per_item = target_paths.size(1)
+            path_length = target_paths.size(2)
+            user_emb = user_emb.unsqueeze(1)
+            user_emb = user_emb.expand(-1, paths_per_item, -1)
+            user_emb = user_emb.reshape(
+                batch_size * paths_per_item,
+                user_emb.size(2)
+            )
+            target_paths = target_paths.reshape(
+                batch_size * paths_per_item,
+                path_length
+            )
+
             level1_logits = self.layer1(user_emb)  
             
             level1_nodes = target_paths[:, 0]  # [batch_size]
@@ -195,9 +205,14 @@ class DeepRetrieval(nn.Module):
             level3_log_probs = torch.log(level3_probs.gather(1, level3_indices.unsqueeze(1)).squeeze(1) + 1e-10)
             
             path_log_probs = level1_log_probs + level2_log_probs + level3_log_probs
+            path_log_probs = path_log_probs.reshape(batch_size, paths_per_item)
+
+            # 一个物品可以对应多条路径。物品概率等于这些路径概率之和。
+            item_log_probs = torch.logsumexp(path_log_probs, dim=1)
             
             return {
                 'path_log_probs': path_log_probs,
+                'item_log_probs': item_log_probs,
                 'level1_logits': level1_logits,
                 'level2_logits': level2_logits,
                 'level3_logits': level3_logits
@@ -333,6 +348,10 @@ class DeepRetrievalRecommender:
             num_paths_per_item=self.num_paths_per_item,
             path_length=self.path_length
         )
+
+        # 训练集和测试集必须使用同一套“物品 <-> 路径”映射。
+        self.test_dataset.item_to_paths = self.train_dataset.item_to_paths
+        self.test_dataset.path_to_items = self.train_dataset.path_to_items
         
         self.train_dataloader = DataLoader(
             self.train_dataset, 
@@ -356,8 +375,6 @@ class DeepRetrievalRecommender:
         return True
     
     def train(self):
-        # 使用负对数似然损失
-        criterion = nn.NLLLoss()
         optimizer = optim.Adam(
             self.model.parameters(), 
             lr=self.learning_rate,
@@ -374,13 +391,12 @@ class DeepRetrievalRecommender:
             for batch in self.train_dataloader:
 
                 user_idx = batch['user_idx'].to(self.device)
-                target_path = batch['target_path'].to(self.device)
+                target_paths = batch['target_paths'].to(self.device)
 
-                outputs = self.model(user_idx, target_path)
-                path_log_probs = outputs['path_log_probs']
+                outputs = self.model(user_idx, target_paths)
+                item_log_probs = outputs['item_log_probs']
                 
-
-                loss = -path_log_probs.mean()
+                loss = -item_log_probs.mean()
                 
 
                 optimizer.zero_grad()
@@ -399,12 +415,12 @@ class DeepRetrievalRecommender:
             with torch.no_grad():
                 for batch in self.test_dataloader:
                     user_idx = batch['user_idx'].to(self.device)
-                    target_path = batch['target_path'].to(self.device)
+                    target_paths = batch['target_paths'].to(self.device)
                     
-                    outputs = self.model(user_idx, target_path)
-                    path_log_probs = outputs['path_log_probs']
+                    outputs = self.model(user_idx, target_paths)
+                    item_log_probs = outputs['item_log_probs']
                     
-                    loss = -path_log_probs.mean()
+                    loss = -item_log_probs.mean()
                     test_loss += loss.item() * user_idx.size(0)
                 
                 test_loss /= len(self.test_dataloader.dataset)
