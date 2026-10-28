@@ -10,6 +10,18 @@
 主要示例使用转换后的 ml-100k/ratings.csv，字段为
 userId,movieId,rating,timestamp。原始 MovieLens 100K 文件也保留在同一目录。
 
+## 小测验
+
+每个模块都有对应的测试 tests/test_<模块名>.py，题目用手算的小数据检查公式、
+形状和关键性质（比如因果掩码、padding 不参与 attention）。
+
+- python quiz.py：查看所有模块的完成情况
+- python quiz.py item_cf：查看某个模块每道题的结果，加 -v 显示完整报错
+- python quiz.py item_cf --watch：保存代码后自动重新测试
+
+想重新练习某个模块时，把函数体换成 raise NotImplementedError，
+总览里会显示为“还没开始”，写完后再跑一遍即可。
+
 ## 原始数据说明
 - **u.data**：主评分数据，结构为：
   
