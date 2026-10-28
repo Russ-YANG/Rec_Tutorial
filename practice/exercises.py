@@ -14,6 +14,35 @@ from quiz import MODULES, ROOT, run_pytest, test_file
 # 运行测试需要的目录，复制到临时目录里，不动原文件
 PACKAGES = ["common", "召回", "排序", "特征交叉", "序列", "多样性", "GNN", "transformer", "tests"]
 
+# 网页里只练算法的核心步骤。读数据、训练循环、__init__、fit/recommend 这类封装
+# 和公共模块直接用现成的。想多练或少练哪个函数，改这里就行。
+CORE_EXERCISES = {
+    "item_cf": ["item_similarity", "build_similar_items", "score_items"],
+    "user_cf": ["user_similarity", "build_similar_users", "score_items"],
+    "swing": ["swing_similarity"],
+    "matrix_completion": ["MatrixCompletionModel.forward", "mse_loss"],
+    "dssm": ["DSSM.get_user_embedding", "DSSM.get_item_embedding", "DSSM.forward", "bce_loss"],
+    "dr": ["generate_item_paths", "DeepRetrieval.level_log_probs", "DeepRetrieval.path_log_probs",
+           "DeepRetrieval.forward", "DeepRetrieval.beam_search", "path_loss"],
+    "mmoe": ["mix_experts", "MMoE.forward", "multitask_loss"],
+    "fm": ["interaction_term", "fm_predict", "fm_gradients", "FactorizationMachine.fit"],
+    "dcn": ["cross_layer", "CrossNetwork.forward", "DCN.forward"],
+    "senet": ["SENet.field_weights", "SENet.forward"],
+    "bilinear_interaction": ["matrix_index", "bilinear", "BilinearInteraction.forward"],
+    "fibinet": ["FiBiNET.forward"],
+    "lhuc_ppnet": ["lhuc_gate", "LHUC_PPNet.forward"],
+    "din": ["attention_features", "sequence_mask", "masked_softmax", "AttentionLayer.forward", "DIN.forward"],
+    "sim": ["hard_search", "SIM.exact_search", "SIM.forward"],
+    "dpp": ["cosine_similarity_matrix", "compute_kernel_matrix", "hyperparallelepiped_volume", "best_candidate",
+            "DPP.greedy_select", "DPP.sliding_window_select", "mmr_score", "MMR.select"],
+    "lightgcn": ["build_normalized_adjacency", "propagate", "bpr_loss",
+                 "LightGCN.compute_embeddings", "LightGCN.bpr_loss"],
+    "transformer": ["scaled_dot_product_attention", "causal_mask", "split_heads", "merge_heads",
+                    "MultiHeadAttention.forward", "MLP.forward", "EncoderLayer.forward", "DecoderLayer.forward",
+                    "sinusoidal_encoding", "lm_loss", "sample_next_token",
+                    "LanguageModel.forward", "LanguageModel.generate"],
+}
+
 
 def read_file(path):
     with open(os.path.join(ROOT, path), encoding="utf-8") as file:
@@ -68,14 +97,19 @@ def summary(node):
 
 
 def list_modules():
+    """只列出 CORE_EXERCISES 里的函数，没有练习题的模块不显示"""
     modules = []
     for name, chapter, source in MODULES:
+        core = CORE_EXERCISES.get(name, [])
         files = []
         for path in module_files(source):
             functions = [{"name": qualname, "summary": summary(node)}
-                         for qualname, node in iter_functions(ast.parse(read_file(path)))]
-            files.append({"path": path, "functions": functions})
-        modules.append({"name": name, "chapter": chapter, "source": source, "files": files})
+                         for qualname, node in iter_functions(ast.parse(read_file(path)))
+                         if qualname in core]
+            if functions:
+                files.append({"path": path, "functions": functions})
+        if files:
+            modules.append({"name": name, "chapter": chapter, "source": source, "files": files})
     return modules
 
 

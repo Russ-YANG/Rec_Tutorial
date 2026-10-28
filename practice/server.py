@@ -112,7 +112,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(port=8765, open_browser=True):
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError:
+        raise SystemExit(f"端口 {port} 被占用了，可能已经有一个练习页面在运行。"
+                         f"换个端口试试: python -m practice --port {port + 1}")
     url = f"http://127.0.0.1:{port}"
     print(f"练习页面: {url}  按 Ctrl+C 退出")
     if open_browser:
