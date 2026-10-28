@@ -22,12 +22,22 @@ common/ 放各个算法共用、和算法本身无关的代码：
 - recommend.py：按分数排序、排除已交互物品、向量召回、排序模型逐个物品打分
 
 每个算法文件开头的注释列出了算法步骤，每一步对应一个函数，可以单独阅读和测试。
-召回和排序模型（MMoE、DCN）的用法统一为：
+召回、排序和 GNN 模型（ItemCF、DSSM、MMoE、DCN、LightGCN 等）的用法统一为：
 
     model = ItemCF(top_k=10, lastn=20).fit(load_ratings())
     model.recommend(user_id, n_rec=10)  # [(item_id, score), ...]
 
-FM、SENet、Bilinear、FiBiNET、LHUC/PPNet 只实现网络结构本身，输入是已经准备好的特征。
+FM、SENet、Bilinear、FiBiNET、LHUC/PPNet、DIN、SIM 只实现网络结构本身，输入是已经准备好的特征。
+SIM 复用了 DIN 的 attention 函数，Swing 继承自 ItemCF。
+
+transformer/ 拆成了几个文件：
+
+- model.py：注意力、多头、Encoder/Decoder、位置编码和手写的语言模型
+- torch_version.py：用 nn.TransformerEncoder 实现的同一个模型
+- data.py：分词器和英文句子数据集
+- train.py：训练两个模型并对比，运行 python -m transformer.train
+
+多样性的对比示例：python -m 多样性.dpp
 
 ## 小测验
 

@@ -3,9 +3,10 @@ import math
 import torch
 import torch.nn.functional as F
 
-from transformer import (
-    Decoder, Encoder, LayerNorm, MultiHeadAttention, PositionalEncoding,
-    SimpleTokenizer, Transformer, TransformerConfig, attention,
+from transformer.model import (
+    Decoder, Encoder, LayerNorm, MultiHeadAttention, PositionalEncoding, Transformer, TransformerConfig,
+    causal_mask, lm_loss, merge_heads, sample_next_token, scaled_dot_product_attention, sinusoidal_encoding,
+    split_heads,
 )
 
 
@@ -18,7 +19,28 @@ def small_config(**kwargs):
 def test_缩放点积注意力公式():
     q, k, v = torch.randn(2, 3, 4), torch.randn(2, 5, 4), torch.randn(2, 5, 6)
     weights = F.softmax(q @ k.transpose(-2, -1) / math.sqrt(4), dim=-1)
-    assert torch.allclose(attention(q, k, v), weights @ v, atol=1e-6)
+    assert torch.allclose(scaled_dot_product_attention(q, k, v), weights @ v, atol=1e-6)
+
+
+def test_掩码位置不参与注意力():
+    q, k, v = torch.randn(1, 2, 4), torch.randn(1, 3, 4), torch.randn(1, 3, 4)
+    mask = torch.tensor([[1, 0, 0], [1, 1, 0]])
+    output = scaled_dot_product_attention(q, k, v, mask)
+    # 第一个位置只能看到第一个 key，输出就是第一个 value
+    assert torch.allclose(output[0, 0], v[0, 0], atol=1e-6)
+
+
+def test_因果掩码是下三角():
+    assert causal_mask(3, 3).tolist() == [[1, 0, 0], [1, 1, 0], [1, 1, 1]]
+
+
+def test_拆分和合并多头():
+    x = torch.randn(2, 5, 8)
+    heads = split_heads(x, n_head=4)
+    assert heads.shape == (2, 4, 5, 2)
+    # 第 h 个头对应向量的第 h 段
+    assert torch.equal(heads[:, 1], x[:, :, 2:4])
+    assert torch.equal(merge_heads(heads), x)
 
 
 def test_多头注意力输出形状():
@@ -54,13 +76,19 @@ def test_LayerNorm():
 
 
 def test_正弦位置编码():
-    encoding = PositionalEncoding(small_config())
-    output = encoding(torch.zeros(1, 4, 8))
+    encoding = sinusoidal_encoding(4, 8)
     for position in range(4):
-        assert torch.isclose(output[0, position, 0], torch.tensor(math.sin(position)), atol=1e-6)
-        assert torch.isclose(output[0, position, 1], torch.tensor(math.cos(position)), atol=1e-6)
+        assert torch.isclose(encoding[position, 0], torch.tensor(math.sin(position)), atol=1e-6)
+        assert torch.isclose(encoding[position, 1], torch.tensor(math.cos(position)), atol=1e-6)
         # 第 2i 维的频率是 1 / 10000^(2i / d)
-        assert torch.isclose(output[0, position, 2], torch.tensor(math.sin(position / 10000 ** (2 / 8))), atol=1e-6)
+        assert torch.isclose(encoding[position, 2], torch.tensor(math.sin(position / 10000 ** (2 / 8))), atol=1e-6)
+
+
+def test_位置编码加到输入上():
+    layer = PositionalEncoding(small_config())
+    x = torch.randn(1, 4, 8)
+    assert torch.allclose(layer(x), x + sinusoidal_encoding(16, 8)[:4])
+    assert len(list(layer.parameters())) == 0, "位置编码是固定的，不参与训练"
 
 
 def test_Encoder和Decoder形状():
@@ -70,6 +98,20 @@ def test_Encoder和Decoder形状():
     memory = encoder(source)
     assert memory.shape == (2, 5, 8)
     assert decoder(target, memory).shape == (2, 3, 8)
+
+
+def test_语言模型损失忽略padding():
+    logits = torch.randn(1, 3, 5)
+    targets = torch.tensor([[2, -1, 4]])
+    expected = F.cross_entropy(logits[0, [0, 2]], torch.tensor([2, 4]))
+    assert torch.allclose(lm_loss(logits, targets), expected)
+
+
+def test_top_k采样只在前k个里选():
+    logits = torch.tensor([[0.0, 5.0, 4.0, -1.0]])
+    for _ in range(50):
+        assert sample_next_token(logits, top_k=2).item() in (1, 2)
+    assert sample_next_token(logits, top_k=1).item() == 1
 
 
 def test_语言模型前向():
@@ -106,7 +148,7 @@ def test_生成指定数量的token():
 
 def test_能过拟合一个小序列():
     model = Transformer(small_config())
-    optimizer = model.configure_optimizers(0.0, 1e-2, (0.9, 0.95), "cpu")
+    optimizer = model.configure_optimizers(0.0, 1e-2, (0.9, 0.95))
     idx = torch.tensor([[1, 2, 3, 4, 5, 6, 7]])
     for _ in range(100):
         _, loss = model(idx[:, :-1], targets=idx[:, 1:])
@@ -114,12 +156,3 @@ def test_能过拟合一个小序列():
         loss.backward()
         optimizer.step()
     assert loss.item() < 0.5
-
-
-def test_分词器编码解码():
-    tokenizer = SimpleTokenizer()
-    ids = tokenizer.encode("The cat is big.")
-    assert ids[0] == tokenizer.vocab_to_id["<BOS>"]
-    assert ids[-1] == tokenizer.vocab_to_id["<EOS>"]
-    assert tokenizer.decode(ids) == "the cat is big"
-    assert tokenizer.vocab_to_id["<UNK>"] in tokenizer.encode("zebra")

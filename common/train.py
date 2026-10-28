@@ -47,9 +47,10 @@ def run_epoch(model, dataloader, compute_loss, device, optimizer=None):
 
 
 def fit(model, train_loader, test_loader, compute_loss, device,
-        n_epochs=20, learning_rate=0.001, weight_decay=0.0, log_every=5):
-    """训练 n_epochs 轮，返回每轮的训练损失和测试损失"""
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        n_epochs=20, learning_rate=0.001, weight_decay=0.0, log_every=5, optimizer=None):
+    """训练 n_epochs 轮，返回每轮的训练损失和测试损失。不传 optimizer 时用 Adam"""
+    if optimizer is None:
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     history = {'train_loss': [], 'test_loss': []}
 
     for epoch in range(n_epochs):

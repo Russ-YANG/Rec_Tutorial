@@ -1,148 +1,140 @@
+"""
+多样性：在相关性之外，让推荐结果彼此不那么像。
+
+DPP (Determinantal Point Process)
+1. compute_kernel_matrix  L_ij = q_i * sim(i, j) * q_j，q 是相关性，sim 是余弦相似度
+2. 一组物品的行列式 det(L_S) = 质量^2 × 向量张成的体积^2，物品越相关、越不相似，行列式越大
+3. greedy_select          每次选一个让 det(L_S) 最大的物品
+4. sliding_window_select  只在相关性最高的几个物品里选，计算更快
+
+MMR (Maximal Marginal Relevance)
+score = λ * 相关性 - (1 - λ) * 和已选物品的最大相似度
+"""
 import numpy as np
 
 
 def normalize_rows(matrix):
-    normalized = np.zeros_like(matrix, dtype=float)
-    for i in range(len(matrix)):
-        length = np.linalg.norm(matrix[i])
-        normalized[i] = matrix[i] / length
-    return normalized
+    return matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
+
+
+def cosine_similarity_matrix(embeddings):
+    normalized = normalize_rows(embeddings)
+    return normalized @ normalized.T
+
+
+def compute_kernel_matrix(embeddings, relevance_scores):
+    """L_ij = q_i * similarity_ij * q_j"""
+    return np.outer(relevance_scores, relevance_scores) * cosine_similarity_matrix(embeddings)
+
+
+def hyperparallelepiped_volume(embeddings):
+    """向量张成的超平行体体积 = sqrt(det(V V^T))"""
+    squared_volume = np.linalg.det(embeddings @ embeddings.T)
+    return np.sqrt(max(squared_volume, 0.0))  # 数值误差可能出现很小的负数
+
+
+def best_candidate(kernel_matrix, selected_indices, candidate_indices):
+    """在候选物品中选一个，加入后让 det(L_S) 最大"""
+    best_index = candidate_indices[0]
+    best_determinant = -np.inf
+    for candidate_index in candidate_indices:
+        subset = selected_indices + [candidate_index]
+        determinant = np.linalg.det(kernel_matrix[np.ix_(subset, subset)])
+        if determinant > best_determinant:
+            best_determinant = determinant
+            best_index = candidate_index
+    return best_index
 
 
 class DPP:
-
     def compute_kernel_matrix(self, embeddings, relevance_scores):
-        normalized_embeddings = normalize_rows(embeddings)
-        similarity_matrix = np.dot(normalized_embeddings, normalized_embeddings.T)
-
-        # DPP 的 L 核：L_ij = q_i * similarity_ij * q_j。
-        # q 表示物品质量，这里直接使用相关性分数。
-        quality_matrix = np.outer(relevance_scores, relevance_scores)
-        kernel_matrix = quality_matrix * similarity_matrix
-        return kernel_matrix
+        return compute_kernel_matrix(embeddings, relevance_scores)
 
     def compute_hyperparallelepiped_volume(self, embeddings):
-        gram_matrix = np.dot(embeddings, embeddings.T)
-        squared_volume = np.linalg.det(gram_matrix)
-        if squared_volume < 0.0 and squared_volume > -1e-10:
-            squared_volume = 0.0
-        return np.sqrt(squared_volume)
+        return hyperparallelepiped_volume(embeddings)
 
     def greedy_select(self, embeddings, relevance_scores, k):
-        kernel_matrix = self.compute_kernel_matrix(embeddings, relevance_scores)
+        kernel_matrix = compute_kernel_matrix(embeddings, relevance_scores)
         selected_indices = []
         remaining_indices = list(range(len(embeddings)))
-
-        while len(selected_indices) < k and len(remaining_indices) > 0:
-            best_index = remaining_indices[0]
-            best_determinant = -1.0
-
-            for candidate_index in remaining_indices:
-                subset = selected_indices + [candidate_index]
-                submatrix = kernel_matrix[np.ix_(subset, subset)]
-                determinant = np.linalg.det(submatrix)
-
-                if determinant > best_determinant:
-                    best_determinant = determinant
-                    best_index = candidate_index
-
+        while len(selected_indices) < k and remaining_indices:
+            best_index = best_candidate(kernel_matrix, selected_indices, remaining_indices)
             selected_indices.append(best_index)
             remaining_indices.remove(best_index)
-
         return selected_indices
 
     def sliding_window_select(self, embeddings, relevance_scores, k, window_size=3):
-        kernel_matrix = self.compute_kernel_matrix(embeddings, relevance_scores)
+        """只在剩余物品里相关性最高的 window_size 个中选"""
+        kernel_matrix = compute_kernel_matrix(embeddings, relevance_scores)
         remaining_indices = np.argsort(relevance_scores)[::-1].tolist()
         selected_indices = []
-
-        while len(selected_indices) < k and len(remaining_indices) > 0:
-            window_indices = remaining_indices[:window_size]
-            best_index = window_indices[0]
-            best_determinant = -1.0
-
-            for candidate_index in window_indices:
-                subset = selected_indices + [candidate_index]
-                submatrix = kernel_matrix[np.ix_(subset, subset)]
-                determinant = np.linalg.det(submatrix)
-
-                if determinant > best_determinant:
-                    best_determinant = determinant
-                    best_index = candidate_index
-
+        while len(selected_indices) < k and remaining_indices:
+            window = remaining_indices[:window_size]
+            best_index = best_candidate(kernel_matrix, selected_indices, window)
             selected_indices.append(best_index)
             remaining_indices.remove(best_index)
-
         return selected_indices
 
 
-class MMR:
+def mmr_score(relevance, max_similarity, lambda_param):
+    return lambda_param * relevance - (1.0 - lambda_param) * max_similarity
 
+
+class MMR:
     def select(self, embeddings, relevance_scores, k, lambda_param=0.5):
-        normalized_embeddings = normalize_rows(embeddings)
+        similarity = cosine_similarity_matrix(embeddings)
         selected_indices = []
         remaining_indices = list(range(len(embeddings)))
-
-        while len(selected_indices) < k and len(remaining_indices) > 0:
+        while len(selected_indices) < k and remaining_indices:
             best_index = remaining_indices[0]
             best_score = -np.inf
-
             for candidate_index in remaining_indices:
-                max_similarity = 0.0
-                for selected_index in selected_indices:
-                    similarity = np.dot(
-                        normalized_embeddings[candidate_index],
-                        normalized_embeddings[selected_index]
-                    )
-                    if similarity > max_similarity:
-                        max_similarity = similarity
-
-                relevance = relevance_scores[candidate_index]
-                score = lambda_param * relevance - (1.0 - lambda_param) * max_similarity
-
+                # 相似度为负时按 0 算，不奖励"反方向"的物品
+                max_similarity = max([0.0] + [similarity[candidate_index, i] for i in selected_indices])
+                score = mmr_score(relevance_scores[candidate_index], max_similarity, lambda_param)
                 if score > best_score:
                     best_score = score
                     best_index = candidate_index
-
             selected_indices.append(best_index)
             remaining_indices.remove(best_index)
-
         return selected_indices
 
 
 def generate_test_data(n_items=50, embedding_dim=10, n_clusters=5):
+    """物品分成几簇，离第 0 簇越近相关性越高"""
     np.random.seed(42)
     cluster_centers = np.random.randn(n_clusters, embedding_dim)
     embeddings = []
     relevance_scores = []
-
     for _ in range(n_items):
         cluster_id = np.random.randint(0, n_clusters)
-        noise = np.random.normal(0, 0.3, embedding_dim)
-        embedding = cluster_centers[cluster_id] + noise
+        embedding = cluster_centers[cluster_id] + np.random.normal(0, 0.3, embedding_dim)
         embeddings.append(embedding)
-
         distance = np.linalg.norm(embedding - cluster_centers[0])
-        relevance = np.exp(-distance / 2.0)
-        relevance_scores.append(relevance)
-
+        relevance_scores.append(np.exp(-distance / 2.0))
     return np.array(embeddings), np.array(relevance_scores)
 
 
 def evaluate_diversity(embeddings, selected_indices):
-    selected_embeddings = embeddings[selected_indices]
-    normalized_embeddings = normalize_rows(selected_embeddings)
-    total_distance = 0.0
-    pair_count = 0
-
-    for i in range(len(selected_indices)):
-        for j in range(i + 1, len(selected_indices)):
-            similarity = np.dot(normalized_embeddings[i], normalized_embeddings[j])
-            total_distance += 1.0 - similarity
-            pair_count += 1
-
-    return total_distance / pair_count
+    """两两之间 1 - 余弦相似度 的平均值"""
+    similarity = cosine_similarity_matrix(embeddings[selected_indices])
+    upper = np.triu_indices(len(selected_indices), k=1)
+    return np.mean(1.0 - similarity[upper])
 
 
 def evaluate_relevance(relevance_scores, selected_indices):
     return np.mean(relevance_scores[selected_indices])
+
+
+if __name__ == "__main__":
+    embeddings, relevance_scores = generate_test_data()
+    k = 10
+    methods = {
+        "按相关性排序": np.argsort(relevance_scores)[::-1][:k].tolist(),
+        "DPP 贪心": DPP().greedy_select(embeddings, relevance_scores, k),
+        "DPP 滑动窗口": DPP().sliding_window_select(embeddings, relevance_scores, k, window_size=5),
+        "MMR": MMR().select(embeddings, relevance_scores, k, lambda_param=0.5),
+    }
+    for name, selected in methods.items():
+        print(f"{name:<10} 相关性: {evaluate_relevance(relevance_scores, selected):.4f}  "
+              f"多样性: {evaluate_diversity(embeddings, selected):.4f}")

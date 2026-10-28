@@ -119,3 +119,27 @@ class PointwiseDataset(Dataset):
             'item_idx': torch.tensor(self.item_map[item_id], dtype=torch.long),
             'label': torch.tensor(1.0 if is_positive else 0.0, dtype=torch.float)
         }
+
+
+class PairwiseDataset(Dataset):
+    """BPR 样本: (用户, 交互过的物品, 随机采的没交互过的物品)"""
+
+    def __init__(self, ratings, user_map, item_map, user_items):
+        self.user_ids = ratings['userId'].tolist()
+        self.item_ids = ratings['movieId'].tolist()
+        self.user_map = user_map
+        self.item_map = item_map
+        self.all_items = list(item_map.keys())
+        self.user_items = user_items
+
+    def __len__(self):
+        return len(self.user_ids)
+
+    def __getitem__(self, idx):
+        user_id = self.user_ids[idx]
+        negative_id = sample_negative(self.all_items, self.user_items[user_id])
+        return {
+            'user_idx': torch.tensor(self.user_map[user_id], dtype=torch.long),
+            'pos_idx': torch.tensor(self.item_map[self.item_ids[idx]], dtype=torch.long),
+            'neg_idx': torch.tensor(self.item_map[negative_id], dtype=torch.long)
+        }

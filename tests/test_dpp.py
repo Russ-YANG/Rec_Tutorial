@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
 
-from 多样性.dpp import DPP, MMR, evaluate_diversity, evaluate_relevance, normalize_rows
+from 多样性.dpp import (
+    DPP, MMR, best_candidate, compute_kernel_matrix, cosine_similarity_matrix, evaluate_diversity,
+    evaluate_relevance, mmr_score, normalize_rows,
+)
 
 
 def test_行归一化():
@@ -82,3 +85,20 @@ def test_多样性和相关性评估():
     assert evaluate_diversity(embeddings, [0, 1]) == pytest.approx(1.0)
     assert evaluate_diversity(embeddings, [0, 2]) == pytest.approx(0.0)
     assert evaluate_relevance(np.array([0.2, 0.4, 0.9]), [0, 2]) == pytest.approx(0.55)
+
+
+def test_余弦相似度矩阵():
+    similarity = cosine_similarity_matrix(np.array([[1.0, 0.0], [1.0, 1.0], [0.0, 2.0]]))
+    assert np.allclose(np.diag(similarity), 1.0)
+    assert similarity[0, 2] == pytest.approx(0.0)
+    assert similarity[0, 1] == pytest.approx(1 / np.sqrt(2))
+
+
+def test_选出让行列式最大的候选():
+    kernel = compute_kernel_matrix(DUPLICATE_EMBEDDINGS, DUPLICATE_SCORES)
+    assert best_candidate(kernel, [], [0, 1, 2]) == 0
+    assert best_candidate(kernel, [0], [1, 2]) == 2
+
+
+def test_MMR分数公式():
+    assert mmr_score(0.8, 0.5, lambda_param=0.7) == pytest.approx(0.7 * 0.8 - 0.3 * 0.5)

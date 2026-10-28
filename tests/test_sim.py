@@ -1,6 +1,6 @@
 import torch
 
-from 序列.sim import SIM
+from 序列.sim import SIM, hard_search
 
 
 def test_hard_search只找同类别的行为():
@@ -61,3 +61,11 @@ def test_SIM输出():
     assert prediction.shape == (2,)
     assert torch.all((prediction > 0) & (prediction < 1))
     assert weights.shape == (2, 3) and searched.shape == (2, 3)
+
+
+def test_hard_search函数和方法一致():
+    history_items = torch.tensor([[1, 2, 3, 4]])
+    history_categories = torch.tensor([[7, 8, 7, 7]])
+    searched, lengths = hard_search(torch.tensor([7]), history_items, history_categories, torch.tensor([4]), top_k=2)
+    assert searched[0].tolist() == [4, 3]
+    assert lengths.tolist() == [2]

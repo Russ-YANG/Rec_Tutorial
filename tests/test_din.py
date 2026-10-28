@@ -1,6 +1,31 @@
 import torch
 
-from 序列.din import DIN, AttentionLayer
+from 序列.din import DIN, AttentionLayer, attention_features, masked_softmax, sequence_mask
+
+
+def test_注意力特征是4部分拼接():
+    query = torch.tensor([[1.0, 2.0]])
+    keys = torch.tensor([[[3.0, 1.0], [0.0, 2.0]]])
+    features = attention_features(query, keys)
+    assert features.shape == (1, 2, 8)
+    assert features[0, 0].tolist() == [1.0, 2.0, 3.0, 1.0, 3.0, 2.0, -2.0, 1.0]
+
+
+def test_序列掩码():
+    mask = sequence_mask(torch.tensor([2, 0, 3]), max_len=3)
+    assert mask.tolist() == [[True, True, False], [False, False, False], [True, True, True]]
+
+
+def test_带掩码的softmax():
+    scores = torch.tensor([[1.0, 2.0, 100.0]])
+    mask = torch.tensor([[True, True, False]])
+    weights = masked_softmax(scores, mask)
+    assert torch.allclose(weights, torch.cat([torch.softmax(scores[:, :2], dim=1), torch.zeros(1, 1)], dim=1))
+
+
+def test_全是padding时权重全为0():
+    weights = masked_softmax(torch.randn(1, 3), torch.zeros(1, 3, dtype=torch.bool))
+    assert torch.allclose(weights, torch.zeros(1, 3))
 
 
 def make_attention():
@@ -45,7 +70,7 @@ def test_padding的内容不影响结果():
 
 def test_注意力网络输入包含4种特征():
     layer = AttentionLayer(embedding_dim=4, attention_hidden_units=[8])
-    assert layer.attention_net[0].in_features == 4 * 4
+    assert layer.attention_net[0][0].in_features == 4 * 4
 
 
 def test_DIN输出():

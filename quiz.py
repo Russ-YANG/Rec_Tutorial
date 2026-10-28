@@ -36,7 +36,9 @@ MODULES = [
     ("sim", "序列", "序列/sim.py"),
     ("dpp", "多样性", "多样性/dpp.py"),
     ("lightgcn", "GNN", "GNN/lightgcn.py"),
-    ("transformer", "Transformer", "transformer.py"),
+    ("transformer", "Transformer", "transformer/model.py"),
+    ("transformer_torch", "Transformer", "transformer/torch_version.py"),
+    ("transformer_data", "Transformer", "transformer/data.py"),
 ]
 
 
@@ -147,8 +149,6 @@ def watched_files(source):
     common = os.path.join(ROOT, "common")
     common_files = [os.path.join(common, file) for file in os.listdir(common) if file.endswith(".py")]
     files = [os.path.join(folder, file) for file in os.listdir(folder) if file.endswith(".py")]
-    if folder == ROOT:
-        files = [os.path.join(ROOT, source)]
     return files + common_files
 
 
