@@ -2,7 +2,7 @@
 DSSM 双塔：用户塔和物品塔各自把 id 变成向量，用余弦相似度衡量匹配程度。
 两个塔互不依赖，线上可以提前算好所有物品向量，做向量召回。
 
-1. build_tower   一个塔就是 Embedding 后面接一个 MLP
+1. build_mlp     每个塔都是 Embedding 后面接一个 MLP（在 common/layers.py）
 2. DSSM          双塔 + 余弦相似度
 3. bce_loss      pointwise 训练：正样本标签 1，随机负样本标签 0
 """
@@ -12,18 +12,9 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from common.data import PointwiseDataset, build_id_maps, build_user_items, load_ratings, split_ratings
+from common.layers import build_mlp, init_linear_layers
 from common.recommend import recommend_by_embedding
 from common.train import fit, get_device
-
-
-def build_tower(input_dim, hidden_layers):
-    layers = []
-    for hidden_dim in hidden_layers:
-        layers.append(nn.Linear(input_dim, hidden_dim))
-        layers.append(nn.ReLU())
-        layers.append(nn.BatchNorm1d(hidden_dim))
-        input_dim = hidden_dim
-    return nn.Sequential(*layers)
 
 
 class DSSM(nn.Module):
@@ -31,15 +22,13 @@ class DSSM(nn.Module):
         super(DSSM, self).__init__()
         self.user_embedding = nn.Embedding(num_users, embedding_dim)
         self.item_embedding = nn.Embedding(num_items, embedding_dim)
-        self.user_tower = build_tower(embedding_dim, hidden_layers)
-        self.item_tower = build_tower(embedding_dim, hidden_layers)
+        self.user_tower = build_mlp(embedding_dim, hidden_layers)
+        self.item_tower = build_mlp(embedding_dim, hidden_layers)
 
         nn.init.normal_(self.user_embedding.weight, std=0.01)
         nn.init.normal_(self.item_embedding.weight, std=0.01)
-        for layer in list(self.user_tower) + list(self.item_tower):
-            if isinstance(layer, nn.Linear):
-                nn.init.xavier_normal_(layer.weight)
-                nn.init.zeros_(layer.bias)
+        init_linear_layers(self.user_tower)
+        init_linear_layers(self.item_tower)
 
     def get_user_embedding(self, user_idx):
         user_vector = self.user_tower(self.user_embedding(user_idx))

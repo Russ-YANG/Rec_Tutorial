@@ -1,30 +1,67 @@
 import numpy as np
 import pytest
 
-from 特征交叉.fm import FactorizationMachine
+from 特征交叉.fm import FactorizationMachine, fm_gradients, fm_predict, interaction_term
 
 
-def brute_force_predict(model, x):
-    # y = w0 + Σ w_i x_i + Σ_{i<j} <v_i, v_j> x_i x_j
-    result = model.w0 + np.dot(model.w, x)
+def brute_force_interaction(x, v):
+    # Σ_{i<j} <v_i, v_j> x_i x_j
+    result = 0.0
     for i in range(len(x)):
         for j in range(i + 1, len(x)):
-            result += np.dot(model.v[i], model.v[j]) * x[i] * x[j]
+            result += np.dot(v[i], v[j]) * x[i] * x[j]
     return result
 
 
-def test_二阶交叉项的化简公式和暴力计算一致():
-    model = FactorizationMachine(n_features=5, n_factors=3)
-    model.w0 = 0.3
-    model.w = np.random.randn(5)
+def test_交叉项化简公式和暴力计算一致():
     x = np.array([1.0, 0.0, 2.0, -1.0, 0.5])
-    assert model.predict_one(x) == pytest.approx(brute_force_predict(model, x))
+    v = np.random.randn(5, 3)
+    assert interaction_term(x, v) == pytest.approx(brute_force_interaction(x, v))
 
 
-def test_全零输入只剩偏置():
-    model = FactorizationMachine(n_features=4)
-    model.w0 = 1.5
-    assert model.predict_one(np.zeros(4)) == pytest.approx(1.5)
+def test_只有一个非零特征时没有交叉项():
+    x = np.array([0.0, 3.0, 0.0])
+    assert interaction_term(x, np.random.randn(3, 2)) == pytest.approx(0.0)
+
+
+def test_预测是线性项加交叉项():
+    x = np.array([1.0, 2.0])
+    w = np.array([0.5, -1.0])
+    v = np.array([[1.0, 0.0], [2.0, 1.0]])
+    # 0.3 + (0.5 - 2) + <v0, v1> * 1 * 2 = 0.3 - 1.5 + 4
+    assert fm_predict(x, 0.3, w, v) == pytest.approx(2.8)
+
+
+def numeric_gradient(f, value, eps=1e-6):
+    grad = np.zeros_like(value)
+    for index in np.ndindex(value.shape):
+        original = value[index]
+        value[index] = original + eps
+        plus = f()
+        value[index] = original - eps
+        minus = f()
+        value[index] = original
+        grad[index] = (plus - minus) / (2 * eps)
+    return grad
+
+
+def test_梯度和数值梯度一致():
+    x = np.array([1.0, 0.0, 2.0, -0.5])
+    w = np.random.randn(4)
+    v = np.random.randn(4, 3)
+    _, grad_w, grad_v = fm_gradients(x, 1.0, v)
+    assert np.allclose(grad_w, numeric_gradient(lambda: fm_predict(x, 0.0, w, v), w), atol=1e-5)
+    assert np.allclose(grad_v, numeric_gradient(lambda: fm_predict(x, 0.0, w, v), v), atol=1e-5)
+
+
+def test_梯度乘上误差():
+    x = np.array([1.0, 2.0])
+    v = np.random.randn(2, 2)
+    grad_w0, grad_w, grad_v = fm_gradients(x, 3.0, v)
+    _, unit_w, unit_v = fm_gradients(x, 1.0, v)
+    assert grad_w0 == 3.0
+    assert np.allclose(grad_w, 3 * unit_w)
+    assert np.allclose(grad_v, 3 * unit_v)
 
 
 def test_特征交叉权重是隐向量内积():

@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from 特征交叉.lhuc_ppnet import LHUC_PPNet
+from 特征交叉.lhuc_ppnet import LHUC_PPNet, lhuc_gate
 
 
 def test_输出点击率():
@@ -45,3 +45,11 @@ def test_门控范围在0到2之间():
     hidden = F.relu(model.main_layers[0](torch.cat([user, item], dim=1)))
     expected = model.output_layer(hidden * 2.0).squeeze(1)
     assert torch.allclose(model(user, item), expected, atol=1e-5)
+
+
+def test_门值公式():
+    gate_layer = torch.nn.Linear(2, 3)
+    user = torch.randn(4, 2)
+    gate = lhuc_gate(gate_layer, user)
+    assert torch.allclose(gate, 2 * torch.sigmoid(gate_layer(user)))
+    assert torch.all((gate > 0) & (gate < 2))

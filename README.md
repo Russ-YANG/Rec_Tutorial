@@ -18,13 +18,16 @@ common/ 放各个算法共用、和算法本身无关的代码：
 
 - data.py：读数据、id 映射、划分训练集/测试集、用户-物品表、负采样、Dataset
 - train.py：神经网络的训练循环，模型只需要提供 compute_loss(model, batch)
-- recommend.py：按分数排序、排除已交互物品、向量召回
+- layers.py：MLP（build_mlp）和权重初始化
+- recommend.py：按分数排序、排除已交互物品、向量召回、排序模型逐个物品打分
 
 每个算法文件开头的注释列出了算法步骤，每一步对应一个函数，可以单独阅读和测试。
-召回算法的用法统一为：
+召回和排序模型（MMoE、DCN）的用法统一为：
 
     model = ItemCF(top_k=10, lastn=20).fit(load_ratings())
     model.recommend(user_id, n_rec=10)  # [(item_id, score), ...]
+
+FM、SENet、Bilinear、FiBiNET、LHUC/PPNet 只实现网络结构本身，输入是已经准备好的特征。
 
 ## 小测验
 

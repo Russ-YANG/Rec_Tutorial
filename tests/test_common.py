@@ -8,7 +8,8 @@ from common.data import (
     PointwiseDataset, RatingDataset, build_id_maps, build_item_users, build_recent_items,
     build_user_items, load_ratings, sample_negative, split_ratings,
 )
-from common.recommend import recommend_by_embedding, top_n
+from common.layers import build_mlp, init_linear_layers
+from common.recommend import recommend_by_embedding, score_all_items, top_n
 from common.train import fit, run_epoch
 from conftest import CPU
 
@@ -118,3 +119,40 @@ def test_训练循环能降低损失():
     history = fit(model, loader, loader, linear_loss, CPU, n_epochs=30, learning_rate=0.05, log_every=0)
     assert len(history["train_loss"]) == 30
     assert history["train_loss"][-1] < history["train_loss"][0] * 0.1
+
+
+def test_MLP的层结构():
+    mlp = build_mlp(8, [16, 4], dropout=0.2)
+    linears = [layer for layer in mlp if isinstance(layer, nn.Linear)]
+    assert [(layer.in_features, layer.out_features) for layer in linears] == [(8, 16), (16, 4)]
+    assert sum(isinstance(layer, nn.BatchNorm1d) for layer in mlp) == 2
+    assert sum(isinstance(layer, nn.Dropout) for layer in mlp) == 2
+    mlp.eval()
+    assert mlp(torch.randn(3, 8)).shape == (3, 4)
+
+
+def test_MLP可以不要BatchNorm和Dropout():
+    mlp = build_mlp(8, [4], batch_norm=False)
+    assert [type(layer) for layer in mlp] == [nn.Linear, nn.ReLU]
+
+
+def test_初始化后偏置为0():
+    mlp = build_mlp(8, [16, 4])
+    init_linear_layers(mlp)
+    assert all(torch.all(layer.bias == 0) for layer in mlp if isinstance(layer, nn.Linear))
+
+
+def test_逐个给物品打分():
+    def score(user_idx, item_idx):
+        return user_idx * 10.0 + item_idx
+
+    scores = score_all_items(score, 2, num_items=5, device=CPU, batch_size=2)
+    assert scores.tolist() == [20.0, 21.0, 22.0, 23.0, 24.0]
+
+
+def test_打分函数可以返回多列():
+    def score(user_idx, item_idx):
+        return torch.stack([item_idx.float(), -item_idx.float()], dim=1)
+
+    scores = score_all_items(score, 0, num_items=3, device=CPU, batch_size=2)
+    assert scores.tolist() == [[0.0, 0.0], [1.0, -1.0], [2.0, -2.0]]

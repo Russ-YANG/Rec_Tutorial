@@ -1,18 +1,9 @@
 import pytest
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from conftest import CPU
-from 召回.dssm import DSSM, DSSMRecommender, bce_loss, build_tower
-
-
-def test_塔是多层MLP():
-    tower = build_tower(8, [16, 4])
-    linears = [layer for layer in tower if isinstance(layer, nn.Linear)]
-    assert [(layer.in_features, layer.out_features) for layer in linears] == [(8, 16), (16, 4)]
-    tower.eval()
-    assert tower(torch.randn(3, 8)).shape == (3, 4)
+from 召回.dssm import DSSM, DSSMRecommender, bce_loss
 
 
 def make_model():

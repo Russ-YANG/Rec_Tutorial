@@ -1,83 +1,77 @@
+"""
+FM (Factorization Machine)：线性模型 + 二阶特征交叉。
+
+y = w0 + Σ_i w_i x_i + Σ_{i<j} <v_i, v_j> x_i x_j
+
+交叉项的权重矩阵 W (d × d) 近似为 V V^T，V 是 d × k，k 越大越近似、计算量越大。
+
+1. interaction_term    二阶交叉项，用化简公式 O(kd) 计算
+2. fm_predict          线性项 + 交叉项
+3. fm_gradients        平方损失对 w0, w, V 的梯度
+4. FactorizationMachine  SGD 训练
+"""
 import numpy as np
 
-class FactorizationMachine:
 
+def interaction_term(x, v):
+    """
+    Σ_{i<j} <v_i, v_j> x_i x_j = 1/2 * Σ_f [ (Σ_i v_if x_i)^2 - Σ_i v_if^2 x_i^2 ]
+    x: (d,)  v: (d, k)
+    """
+    sum_vx = v.T @ x                 # (k,)
+    sum_v2x2 = (v ** 2).T @ (x ** 2)  # (k,)
+    return 0.5 * np.sum(sum_vx ** 2 - sum_v2x2)
+
+
+def fm_predict(x, w0, w, v):
+    linear_term = w0 + np.dot(w, x)
+    return linear_term + interaction_term(x, v)
+
+
+def fm_gradients(x, error, v):
+    """
+    平方损失 1/2 (y_pred - y)^2 的梯度，error = y_pred - y
+    ∂y/∂w0 = 1
+    ∂y/∂w_i = x_i
+    ∂y/∂v_if = x_i * Σ_j v_jf x_j - v_if * x_i^2
+    """
+    grad_w0 = error
+    grad_w = error * x
+    sum_vx = v.T @ x  # (k,)
+    grad_v = error * (np.outer(x, sum_vx) - v * (x ** 2)[:, None])
+    return grad_w0, grad_w, grad_v
+
+
+class FactorizationMachine:
     def __init__(self, n_features, n_factors=10, learning_rate=0.01, epochs=10):
-        # 初始化参数
         self.n_features = n_features
         self.n_factors = n_factors
         self.learning_rate = learning_rate
         self.epochs = epochs
-        
-        self.w0 = 0  # 全局偏置
-        self.w = np.zeros(n_features)  # 一阶特征权重
-
-        self.v = np.random.normal(scale=0.1, size=(n_features, n_factors))
-        
-    def fit(self, X, y):
- 
-        # 存储每个epoch的损失
-        losses = []
-        
-        for epoch in range(self.epochs):
-            for i in range(len(X)):
-                x = X[i]
-                y_true = y[i]
-                
-                # 计算预测值
-                y_pred = self.predict_one(x)
-                error = y_pred - y_true
-                
-                # 更新w0
-                gradient_w0 = error
-                self.w0 -= self.learning_rate * gradient_w0
-                for j in range(self.n_features):
-                    if x[j] != 0:  # 跳过零值特征，优化稀疏数据计算
-                        gradient_wj = error * x[j]
-                        self.w[j] -= self.learning_rate * gradient_wj
-
-                # 梯度必须基于同一个更新前的参数状态计算。
-                sum_vx = np.zeros(self.n_factors)
-                for f in range(self.n_factors):
-                    sum_vx[f] = np.sum(self.v[:, f] * x)
-
-                for j in range(self.n_features):
-                    if x[j] != 0:
-                        for f in range(self.n_factors):
-                            gradient_vjf = error * (x[j] * sum_vx[f] - self.v[j, f] * x[j]**2)
-                            self.v[j, f] -= self.learning_rate * gradient_vjf
-
-            y_pred = self.predict(X)
-            loss = np.mean((y - y_pred) ** 2)
-            losses.append(loss)
-            
-        return losses
+        self.w0 = 0.0                       # 全局偏置
+        self.w = np.zeros(n_features)       # 一阶权重
+        self.v = np.random.normal(scale=0.1, size=(n_features, n_factors))  # 隐向量
 
     def predict_one(self, x):
-
-        # 线性 w0 + Σ(wi*xi)
-        linear_term = self.w0 + np.dot(self.w, x)
-        
-        interaction_term = 0
-        sum_vx_square = np.zeros(self.n_factors)
-        sum_vx2 = np.zeros(self.n_factors)
-        
-        for j in range(self.n_features):
-            if x[j] != 0:  #
-                vx = self.v[j] * x[j]
-                sum_vx_square += vx
-                sum_vx2 += vx**2
-
-        interaction_term = 0.5 * np.sum(sum_vx_square**2 - sum_vx2)
-        # 最终预测值 = 线性项 + 二阶交互项
-        return linear_term + interaction_term
+        return fm_predict(x, self.w0, self.w, self.v)
 
     def predict(self, X):
-        predictions = []
-        for i in range(len(X)):
-            prediction = self.predict_one(X[i])
-            predictions.append(prediction)
-        return np.array(predictions)
-    
+        return np.array([self.predict_one(x) for x in X])
+
+    def fit(self, X, y):
+        """逐个样本做 SGD，返回每个 epoch 的 MSE"""
+        losses = []
+        for epoch in range(self.epochs):
+            for x, y_true in zip(X, y):
+                error = self.predict_one(x) - y_true
+                # 梯度必须基于同一个更新前的参数状态计算
+                grad_w0, grad_w, grad_v = fm_gradients(x, error, self.v)
+                self.w0 -= self.learning_rate * grad_w0
+                self.w -= self.learning_rate * grad_w
+                self.v -= self.learning_rate * grad_v
+            losses.append(np.mean((y - self.predict(X)) ** 2))
+        return losses
+
     def get_feature_interactions(self, i, j):
+        """特征 i 和 j 的交叉权重 <v_i, v_j>"""
         return np.dot(self.v[i], self.v[j])

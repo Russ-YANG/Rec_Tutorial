@@ -25,3 +25,17 @@ def test_SENet压缩用的是平均值():
     # 两个输入每个域均值相同，所以权重相同
     weights = senet(torch.ones_like(inputs))[:, :, :1]
     assert torch.allclose(senet(shifted), shifted * weights, atol=1e-6)
+
+
+def test_域权重是平均池化后过FC():
+    senet = SENet(num_fields=4, reduction_ratio=2)
+    inputs = torch.randn(3, 4, 5)
+    expected = senet.excitation(inputs.mean(dim=2))
+    weights = senet.field_weights(inputs)
+    assert weights.shape == (3, 4)
+    assert torch.allclose(weights, expected)
+
+
+def test_压缩维度至少为1():
+    senet = SENet(num_fields=2, reduction_ratio=5)
+    assert senet.excitation[0].out_features == 1
