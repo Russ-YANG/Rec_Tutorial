@@ -46,17 +46,19 @@ def test_file(name):
     return os.path.join("tests", f"test_{name}.py")
 
 
-def run_pytest(test_files):
-    """运行 pytest，返回 {测试文件名: [(题目, 是否通过, 失败信息)]}"""
+def run_pytest(test_files, cwd=ROOT):
+    """运行 pytest，返回 {测试文件名: [(题目, 是否通过, 失败信息, 完整报错)]}"""
     with tempfile.TemporaryDirectory() as tmp_dir:
         report_path = os.path.join(tmp_dir, "report.xml")
         # 某个模块导入失败时，其他模块照常测试
-        command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+        command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--color=no",
                    "--continue-on-collection-errors", f"--junitxml={report_path}", *test_files]
-        process = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+        # 报错信息里不要颜色代码，环境变量 FORCE_COLOR / PY_COLORS 会盖过 --color=no
+        env = {key: value for key, value in os.environ.items() if key not in ("FORCE_COLOR", "PY_COLORS")}
+        env["PY_COLORS"] = "0"
+        process = subprocess.run(command, cwd=cwd, capture_output=True, text=True, env=env)
         if not os.path.exists(report_path):
-            print(process.stdout + process.stderr)
-            sys.exit("pytest 没有生成结果，检查一下是否安装了 pytest")
+            raise RuntimeError("pytest 没有生成结果，检查一下是否安装了 pytest\n" + process.stdout + process.stderr)
         tree = ET.parse(report_path)
 
     results = {}
@@ -174,20 +176,20 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="显示完整报错")
     args = parser.parse_args()
 
-    if args.module is None:
-        show_board()
-        return
-
     sources = {name: source for name, _, source in MODULES}
-    if args.module not in sources:
+    if args.module is not None and args.module not in sources:
         sys.exit(f"没有这个模块: {args.module}\n可选: {', '.join(sources)}")
     try:
-        if args.watch:
+        if args.module is None:
+            show_board()
+        elif args.watch:
             watch_module(args.module, sources[args.module], args.verbose)
         else:
             show_module(args.module, args.verbose)
     except KeyboardInterrupt:
         print()
+    except RuntimeError as error:
+        sys.exit(str(error))
 
 
 if __name__ == "__main__":

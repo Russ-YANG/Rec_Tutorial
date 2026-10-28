@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>推荐算法练习场</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">∑</span>
+    <span class="brand-name">推荐算法练习场</span>
+  </div>
+  <nav class="crumbs" id="crumbs" aria-label="当前练习"></nav>
+  <div class="actions">
+    <button type="button" id="btn-reference" class="btn ghost">参考实现</button>
+    <button type="button" id="btn-reset" class="btn ghost">重置为空白</button>
+    <button type="button" id="btn-submit" class="btn primary">提交测试 <kbd id="submit-key">⌘↵</kbd></button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <label class="search">
+      <span class="visually-hidden">搜索函数</span>
+      <input id="search" type="search" placeholder="搜索函数，比如 attention" autocomplete="off">
+    </label>
+    <div id="tree" class="tree" role="tree" aria-label="练习列表">
+      <p class="muted pad">正在读取练习列表…</p>
+    </div>
+  </aside>
+
+  <main class="workspace">
+    <section class="editor-pane" aria-label="代码编辑器">
+      <div class="pane-head">
+        <div class="exercise-title">
+          <code id="function-name"></code>
+          <span id="function-summary" class="muted"></span>
+        </div>
+        <span id="save-state" class="muted small"></span>
+      </div>
+      <div id="editor-host" class="editor-host"></div>
+      <div id="reference" class="reference" hidden>
+        <div class="pane-head">
+          <span>参考实现 <span class="muted small">（只读）</span></span>
+          <button type="button" id="btn-close-reference" class="btn ghost small">关闭</button>
+        </div>
+        <div id="reference-host" class="reference-host"></div>
+      </div>
+    </section>
+
+    <section class="results-pane" aria-label="测试结果" aria-live="polite">
+      <div class="pane-head">
+        <span>测试结果</span>
+        <span id="results-summary" class="muted small"></span>
+      </div>
+      <div id="results" class="results"></div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/runmode/runmode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
