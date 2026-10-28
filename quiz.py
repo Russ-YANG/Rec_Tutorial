@@ -17,6 +17,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # (模块名, 章节, 实现文件)。测试文件统一是 tests/test_<模块名>.py
 MODULES = [
+    ("common", "公共", "common/"),
     ("ml_to_csv", "召回", "召回/ml_to_csv.py"),
     ("item_cf", "召回", "召回/item_cf.py"),
     ("user_cf", "召回", "召回/user_cf.py"),
@@ -142,10 +143,13 @@ def show_module(name, verbose):
 def watched_files(source):
     """实现文件所在的目录里所有 .py，加上对应的测试文件"""
     folder = os.path.dirname(os.path.join(ROOT, source))
+    # 召回等章节依赖公共模块，改了 common/ 也要重新测试
+    common = os.path.join(ROOT, "common")
+    common_files = [os.path.join(common, file) for file in os.listdir(common) if file.endswith(".py")]
     files = [os.path.join(folder, file) for file in os.listdir(folder) if file.endswith(".py")]
     if folder == ROOT:
         files = [os.path.join(ROOT, source)]
-    return files
+    return files + common_files
 
 
 def watch_module(name, source, verbose):

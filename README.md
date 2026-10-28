@@ -10,6 +10,22 @@
 主要示例使用转换后的 ml-100k/ratings.csv，字段为
 userId,movieId,rating,timestamp。原始 MovieLens 100K 文件也保留在同一目录。
 
+在项目根目录用模块方式运行示例，比如 python -m 召回.item_cf。
+
+## 代码结构
+
+common/ 放各个算法共用、和算法本身无关的代码：
+
+- data.py：读数据、id 映射、划分训练集/测试集、用户-物品表、负采样、Dataset
+- train.py：神经网络的训练循环，模型只需要提供 compute_loss(model, batch)
+- recommend.py：按分数排序、排除已交互物品、向量召回
+
+每个算法文件开头的注释列出了算法步骤，每一步对应一个函数，可以单独阅读和测试。
+召回算法的用法统一为：
+
+    model = ItemCF(top_k=10, lastn=20).fit(load_ratings())
+    model.recommend(user_id, n_rec=10)  # [(item_id, score), ...]
+
 ## 小测验
 
 每个模块都有对应的测试 tests/test_<模块名>.py，题目用手算的小数据检查公式、
@@ -20,7 +36,8 @@ userId,movieId,rating,timestamp。原始 MovieLens 100K 文件也保留在同一
 - python quiz.py item_cf --watch：保存代码后自动重新测试
 
 想重新练习某个模块时，把函数体换成 raise NotImplementedError，
-总览里会显示为“还没开始”，写完后再跑一遍即可。
+总览里会显示为“还没开始”，写完后再跑一遍即可。也可以只挖空一个函数，
+比如 召回/item_cf.py 里的 item_similarity，题目名会告诉你哪一步没写对。
 
 ## 原始数据说明
 - **u.data**：主评分数据，结构为：

@@ -1,125 +1,86 @@
-import pandas as pd
-from collections import defaultdict
+"""
+UserCF：和用户 u 相似的用户喜欢物品 j，就把 j 推荐给 u。
+
+1. user_similarity       两个用户的相似度
+2. build_similar_users   每个用户取最相似的 top_k 个，得到用户-用户索引
+3. score_items           用相似用户交互过的物品给候选物品打分
+"""
 import math
+from collections import defaultdict
+
+from common.data import build_recent_items, build_user_items, load_ratings
+from common.recommend import top_n
+
+
+def user_similarity(items_u, items_v):
+    """sim(u, v) = |I_u ∩ I_v| / sqrt(|I_u| * |I_v|)"""
+    common_items = set(items_u) & set(items_v)
+    if not common_items:
+        return 0.0
+    return len(common_items) / math.sqrt(len(items_u) * len(items_v))
+
+
+def build_similar_users(user_items, top_k):
+    """
+    user_items: {user: 交互过的物品}
+    返回 {user: [(相似用户, 相似度), ...]}，按相似度从高到低，最多 top_k 个
+    """
+    user_ids = list(user_items.keys())
+    user_sim = defaultdict(dict)
+
+    for a in range(len(user_ids)):
+        for b in range(a + 1, len(user_ids)):
+            user_u, user_v = user_ids[a], user_ids[b]
+            sim = user_similarity(user_items[user_u], user_items[user_v])
+            if sim > 0:
+                user_sim[user_u][user_v] = sim
+                user_sim[user_v][user_u] = sim
+
+    similar_users = {}
+    for user_id, sims in user_sim.items():
+        similar_users[user_id] = sorted(sims.items(), key=lambda x: x[1], reverse=True)[:top_k]
+    return similar_users
+
+
+def score_items(similar_users, user_items):
+    """
+    score(j) = Σ_{v ∈ 相似用户, j ∈ I_v} sim(u, v)
+    similar_users: [(相似用户, 相似度), ...]
+    """
+    scores = defaultdict(float)
+    for user_v, sim in similar_users:
+        for item_id in user_items[user_v]:
+            scores[item_id] += sim
+    return scores
 
 
 class UserCF:
-    def __init__(self, 
-                 dataset_path="ml-100k/ratings.csv", 
-                 top_k=10,
-                 lastn=15):
-    
-        # 同样维护两个索引
-        # 用户 - 物品索引 保留用户最近交互的15个物品
-        self.user_item_index = defaultdict(list)
-        # 用户 - 用户索引 保留每个用户的top_k个相似用户
-        self.user_user_index = defaultdict(list)
-
-        self.dataset_path = dataset_path
+    def __init__(self, top_k=10, lastn=15):
+        """
+        top_k: 每个用户保留最相似的 top_k 个用户
+        lastn: 每个用户保留最近交互的 lastn 个物品，相似度也只用这些物品算
+        """
         self.top_k = top_k
         self.lastn = lastn
-        self.ratings = None
-        # 交集索引 如果直接存成嵌套字典会很大
 
+    def fit(self, ratings):
+        self.user_items = build_user_items(ratings)
+        self.recent_items = build_recent_items(ratings, self.lastn)       # 用户-物品索引
+        self.similar_users = build_similar_users(self.recent_items, self.top_k)  # 用户-用户索引
+        return self
 
-    def load_data(self):
-        try:
-            self.ratings = pd.read_csv(self.dataset_path)
-            print(f"共{len(self.ratings)}条数据")
-            return True
-        except FileNotFoundError:
-            # print(111)
-            return False
+    def get_similar_users(self, user_id):
+        return self.similar_users.get(user_id, [])
 
-    def get_user_items(self):
-        # 构建用户 - 物品索引
-        if self.ratings is not None:
-            sorted_ratings = self.ratings.sort_values("timestamp")
-            for user, group in sorted_ratings.groupby("userId"):
-                self.user_item_index[user] = group["movieId"].tail(self.lastn).tolist()
-        return self.user_item_index
-    
-    def get_user_users(self):
-        # 构建用户 - 用户索引 即和用户最相似的top_k个用户 调用calculate_user_similarity()计算相似度
-
-        for user1 in self.user_item_index.keys():
-            similarities = []
-            for user2 in self.user_item_index.keys():
-                if user1 != user2:
-                    sim = self.calculate_user_similarity(user1, user2)
-                    similarities.append((user2, sim))
-            # 取前k个相似用户
-            similarities = sorted(similarities, key=lambda x: x[1], reverse=True)[:self.top_k]
-            self.user_user_index[user1] = similarities
-
-        return self.user_user_index
-
-    def calculate_user_similarity(self, user1, user2):
-        # sim = |N(u1) ∩ N(u2)| / sqrt(|N(u1)| * |N(u2)|)
-
-        user1_items = set(self.user_item_index.get(user1, []))
-        user2_items = set(self.user_item_index.get(user2, []))
-
-        intersection = user1_items.intersection(user2_items)
-        if not intersection:
-            return 0
-
-        return len(intersection) / math.sqrt(len(user1_items) * len(user2_items))
-    
-
-
-    def get_item_users(self):
-        # 返回某个物品喜欢的用户数量
-        item_users = defaultdict(set) #这里用set是为了去重
-        for user, items in self.user_item_index.items():
-            for item in items:
-                item_users[item].add(user)
-        # 返回格式是 {item_id: user_count}
-        return {item: len(users) for item, users in item_users.items()}
-    
-    def recommend_for_user(self, user_id, n_rec=10):
-
-        user_interacted_items = set(self.user_item_index[user_id])
-        item_scores = defaultdict(float)
-        similar_users = self.user_user_index[user_id]
-        for sim_user_id, similarity in similar_users:
-            # 相似用户交互的物品
-            sim_user_items = self.user_item_index[sim_user_id]
-            
-            for item_id in sim_user_items:
-                if item_id in user_interacted_items:
-                    continue
-
-                item_scores[item_id] += similarity
-
-        return sorted(item_scores.items(), key=lambda x: x[1], reverse=True)[:n_rec]
-    
-    def get_similar_users(self, user_id, n_users=10):
-
-        if user_id not in self.user_user_index:
-            print(f"用户ID {user_id} 不在数据集中")
-            return []
-        
-        # 返回前n_users个相似用户
-        similar_users = self.user_user_index[user_id]
-        return similar_users[:min(n_users, len(similar_users))]
-    
-    def train(self):
-
-        self.get_user_items()
-        self.get_user_users()
-        return 0
+    def recommend(self, user_id, n_rec=10):
+        scores = score_items(self.get_similar_users(user_id), self.recent_items)
+        return top_n(scores, n_rec, exclude=self.user_items[user_id])
 
 
 if __name__ == "__main__":
-    model = UserCF(dataset_path="ml-100k/ratings.csv", top_k=10, lastn=15)
-    if model.load_data():
-        model.train()
-        user_id = 1  
-        recommendations = model.recommend_for_user(user_id, n_rec=10)
-        
-        print(f"\n为用户 {user_id} 的推荐物品:")
-        for item_id, score in recommendations:
-            print(f"物品ID: {item_id}, 分数: {score:.4f}")
-    else:
-        print("数据文件未找到，请检查路径")
+    model = UserCF(top_k=10, lastn=15).fit(load_ratings())
+
+    user_id = 1
+    print(f"\n为用户 {user_id} 的推荐物品:")
+    for item_id, score in model.recommend(user_id, n_rec=10):
+        print(f"物品ID: {item_id}, 分数: {score:.4f}")

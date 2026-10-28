@@ -1,144 +1,100 @@
-import pandas as pd
-from collections import defaultdict
+"""
+ItemCF：用户喜欢物品 i，就给他推荐和 i 相似的物品 j。
+
+1. item_similarity       两个物品的相似度
+2. build_similar_items   每个物品取最相似的 top_k 个，得到物品-物品索引
+3. score_items           用用户最近交互的物品给候选物品打分
+"""
 import math
+from collections import defaultdict
+
+from common.data import build_item_users, build_recent_items, build_user_items, load_ratings
+from common.recommend import top_n
+
+
+def item_similarity(users_i, users_j):
+    """
+    sim(i, j) = |U_i ∩ U_j| / sqrt(|U_i| * |U_j|)
+    users_i: 喜欢物品 i 的用户集合
+
+    这里没有考虑喜欢程度。如果考虑评分，就是余弦相似度:
+    Σ_u r_ui * r_uj / (sqrt(Σ_u r_ui^2) * sqrt(Σ_u r_uj^2))
+    """
+    common_users = set(users_i) & set(users_j)
+    if not common_users:
+        return 0.0
+    return len(common_users) / math.sqrt(len(users_i) * len(users_j))
+
+
+def build_similar_items(item_users, similarity, top_k):
+    """
+    item_users: {item: 喜欢它的用户}
+    similarity: 计算两个物品相似度的函数，传入两个用户集合
+    返回 {item: [(相似物品, 相似度), ...]}，按相似度从高到低，最多 top_k 个
+    """
+    item_ids = list(item_users.keys())
+    item_sim = defaultdict(dict)
+
+    # 相似度是对称的，只算 i < j 的一半
+    for a in range(len(item_ids)):
+        for b in range(a + 1, len(item_ids)):
+            item_i, item_j = item_ids[a], item_ids[b]
+            sim = similarity(item_users[item_i], item_users[item_j])
+            if sim > 0:
+                item_sim[item_i][item_j] = sim
+                item_sim[item_j][item_i] = sim
+
+    similar_items = {}
+    for item_id, sims in item_sim.items():
+        similar_items[item_id] = sorted(sims.items(), key=lambda x: x[1], reverse=True)[:top_k]
+    return similar_items
+
+
+def score_items(recent_items, user_ratings, similar_items):
+    """
+    score(j) = Σ_{i ∈ 最近交互的物品} rating(u, i) * sim(i, j)
+    即 用户对历史物品的兴趣 * 候选物品和该物品的相似度
+    """
+    scores = defaultdict(float)
+    for item_i in recent_items:
+        for item_j, sim in similar_items.get(item_i, []):
+            scores[item_j] += user_ratings[item_i] * sim
+    return scores
+
 
 class ItemCF:
-    def __init__(self, 
-                 dataset_path="ml-100k/ratings.csv", 
-                 top_k=10,
-                 lastn=20):
+    def __init__(self, top_k=10, lastn=20):
         """
-        取最相似的10个物品，保留用户最近交互的20个物品
-        Each user has rated at least 20 movies
+        top_k: 每个物品保留最相似的 top_k 个物品
+        lastn: 每个用户保留最近交互的 lastn 个物品
         """
-        self.dataset_path = dataset_path
         self.top_k = top_k
         self.lastn = lastn
-        self.ratings = None
-        self.item_sim = None
-        self.item_sim_sorted = None
-        self.user_items = None
-        self.user_item_index = None
-        self.item_item_index = None
-    
-    def load_data(self):
-        try:
-            self.ratings = pd.read_csv(self.dataset_path)
-            print(f"共{len(self.ratings)}条数据")
-            return True
-        except FileNotFoundError:
-            # print(111)
-            return False
-    
-    def compute_item_similarity(self):
 
-        self.user_items = defaultdict(dict)  # 用户对物品的评分
-        item_users = defaultdict(dict)       # 后面算交集用
+    def item_similarity(self, users_i, users_j):
+        # 子类（比如 Swing）只需要换掉这一步
+        return item_similarity(users_i, users_j)
 
-        for _, row in self.ratings.iterrows():
-            user_id = row['userId']
-            item_id = row['movieId']
-            rating = row['rating']
-
-            self.user_items[user_id][item_id] = rating
-            item_users[item_id][user_id] = rating
-
-        self.item_sim = defaultdict(dict) 
-        self.item_sim_sorted = defaultdict(list)  # 存储每个物品的top_k个最相似物品
-
-        total_items = len(item_users) # 物品总数
-        
-        for i, (item_i, users_i) in enumerate(item_users.items()):
-            
-            similarities = []
-            
-            for item_j, users_j in item_users.items():
-                if item_i == item_j:
-                    continue
-                
-                # 同时喜欢两个物品的用户集合
-                common_users = set(users_i.keys()) & set(users_j.keys())
-                
-                if len(common_users) == 0:
-                    continue
-                    
-                # 相似度计算：同时喜欢两个物品的人数 / sqrt(喜欢物品i的人数 * 喜欢物品j的人数) 
-                # 这里没有考虑到喜欢程度
-                similarity = len(common_users) / math.sqrt(len(users_i) * len(users_j))
-                # 如果考虑喜欢程度，其实就是余弦相似度
-                # 分子 = 用户A对物品i的评分 * 用户A对物品j的评分 + 用户B对物品i的评分 * 用户B对物品j的评分 + ...
-                # 分母 = sqrt(用户A对物品i的评分^2 + 用户B对物品i的评分^2 + ...) * sqrt(用户A对物品j的评分^2 + 用户B对物品j的评分^2 + ...)
-
-                # likes = [users_i[u] * users_j[u] for u in common_users] # 这是分子
-                # denom = math.sqrt(sum([users_i[u]**2 for u in common_users])) * math.sqrt(sum([users_j[u]**2 for u in common_users])) # 分母
-                # similarity = sum(likes) / denom
-
-
-                self.item_sim[item_i][item_j] = similarity
-                similarities.append((similarity, item_j))
-            
-            # 直接对所有相似度排序，选择top_k个
-            similarities.sort(reverse=True)
-            self.item_sim_sorted[item_i] = similarities[:self.top_k]
-    
-    def recommend_for_user(self, user_id, n_rec=10):
-
-        interacted_item_ids = self.user_item_index[user_id]
-        interacted_items = set(interacted_item_ids)
-        item_scores = defaultdict(float)
-
-        for item_i in interacted_item_ids:
-            rating_i = self.user_items[user_id][item_i]
-            # 用户对历史交互物品的兴趣 * 待计算物品和该物品的相似度
-            for sim_ij, item_j in self.item_sim_sorted[item_i]:
-                if item_j in interacted_items:  # 跳过用户已交互的物品
-                    continue
-                item_scores[item_j] += rating_i * sim_ij
-        return sorted(item_scores.items(), key=lambda x: x[1], reverse=True)[:n_rec]
-    
-    def build_user_item_index(self):
-        self.user_item_index = {}
-        
-        sorted_ratings = self.ratings.sort_values('timestamp')
-        for user_id, group in sorted_ratings.groupby('userId'):
-            recent_items = group['movieId'].tail(self.lastn).tolist()
-            self.user_item_index[user_id] = recent_items
-    
-    def build_item_item_index(self):
-        """
-        构建物品到物品的索引，返回每个物品最相似的K个物品
-        """
-        self.item_item_index = {}
-        
-        for item_id, similar_items in self.item_sim_sorted.items():
-            self.item_item_index[item_id] = [item for _, item in similar_items]
-    
-    def get_similar_items(self, item_id):
-        return self.item_item_index[item_id]
-    
-    def get_user_interacted_items(self, user_id):
-        return self.user_item_index[user_id]
-    
-    def train(self):
-        self.compute_item_similarity()
-        
-        # 构建索引
-        self.build_user_item_index()
-        self.build_item_item_index()
-        
+    def fit(self, ratings):
+        self.user_items = build_user_items(ratings)       # 用户 -> {物品: 评分}
+        self.item_users = build_item_users(ratings)       # 物品 -> {用户: 评分}
+        self.recent_items = build_recent_items(ratings, self.lastn)  # 用户-物品索引
+        self.similar_items = build_similar_items(self.item_users, self.item_similarity, self.top_k)  # 物品-物品索引
         return self
 
+    def get_similar_items(self, item_id):
+        return [item for item, _ in self.similar_items.get(item_id, [])]
+
+    def recommend(self, user_id, n_rec=10):
+        scores = score_items(self.recent_items[user_id], self.user_items[user_id], self.similar_items)
+        # 跳过用户已经交互过的物品
+        return top_n(scores, n_rec, exclude=self.user_items[user_id])
+
+
 if __name__ == "__main__":
-    item_cf = ItemCF(dataset_path="ml-100k/ratings.csv", top_k=20, lastn=50)
-    if not item_cf.load_data():
-        exit()
-    
-    item_cf.train()
-    
-    user_id = 1  
-    recommendations = item_cf.recommend_for_user(user_id, n_rec=10)
-    
+    model = ItemCF(top_k=20, lastn=50).fit(load_ratings())
+
+    user_id = 1
     print(f"\n为用户 {user_id} 的推荐物品:")
-    for item_id, score in recommendations:
+    for item_id, score in model.recommend(user_id, n_rec=10):
         print(f"物品ID: {item_id}, 分数: {score:.4f}")
-    

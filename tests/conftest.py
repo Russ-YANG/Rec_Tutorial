@@ -63,3 +63,13 @@ def small_csv(tmp_path):
     path = tmp_path / "small.csv"
     pd.DataFrame(rows, columns=["userId", "movieId", "rating", "timestamp"]).to_csv(path, index=False)
     return str(path)
+
+
+@pytest.fixture
+def tiny_ratings(tiny_csv):
+    return pd.read_csv(tiny_csv)
+
+
+@pytest.fixture
+def small_ratings(small_csv):
+    return pd.read_csv(small_csv)
